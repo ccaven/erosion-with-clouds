@@ -158,7 +158,7 @@ struct box {
     vec3 size;
 };
 
-box b1 = box(vec3(0, 0.3, 0), vec3(1.5, 0.5, 1.5));
+box b1 = box(vec3(0, 0.5, 0), vec3(2.0, 0.75, 2.0));
 
 bool raytraceBox(vec3 o, vec3 d, out float ct, out float ft, box b) {
     vec3 tMin;
@@ -226,7 +226,7 @@ float densityAtPoint(vec3 p){
     return max(
         fbm(
             (p - vec3(iTime, 0, 0)) * vec3(0.5, 1, 0.5)) * 5.0 - 
-            noise3((p - vec3(iTime, 0, 0))*5.0) * 5.0, 
+            noise3((p - vec3(iTime, 0, 0)) * 5.0) * 5.0, 
         0.0);
 }
 
@@ -254,14 +254,15 @@ vec2 renderVolume(vec3 o, vec3 d, float ct, float ft, int res){
     for(int i = 0; i < res; i++){
         //vec3 lightDir = normalize(vec3(0, 10, cos(iTime)*100.0 - 100.0) - samplePos);
         vec3 lightDir = normalize(vec3(-10, -10, 10));
+        float ld = densityAtPoint(samplePos);
         float lct;
         float lft;
         bool lightHit = raytraceBox(samplePos, lightDir, lct, lft, b1);
-        float currDensity = exp(-mediaDensity*stepLength*densityAtPoint(samplePos));
+        float currDensity = exp(-mediaDensity*stepLength*ld);
         density *= currDensity;
         if(lightHit){
             float lDensity = getDensityOnRay(samplePos, lightDir, lct, lft, 5);
-            transmittance += density*lDensity*densityAtPoint(samplePos)*mediaDensity*stepLength;
+            transmittance += density*lDensity*ld*mediaDensity*stepLength;
         }
         outDensity += (1.0 - currDensity)*(1.0 - outDensity);
         samplePos += stepDir;
@@ -324,6 +325,7 @@ const planeMesh = new THREE.Mesh(plane, new THREE.ShaderMaterial({
     vertexShader: /* glsl */`
     varying vec3 vOrigin;
     varying vec3 vDirection;
+    varying vec3 vWorldPosition;
 
     //uniform mat4 modelMatrix;
     //uniform mat4 modelViewMatrix;
@@ -334,12 +336,13 @@ const planeMesh = new THREE.Mesh(plane, new THREE.ShaderMaterial({
         vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
         gl_Position = projectionMatrix * mvPosition;
 
+        vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+
     }
     
     `,
     fragmentShader: /* glsl */`
     #include <packing>
-
 
     #define dot2(v) dot(v, v)
 
@@ -351,6 +354,8 @@ const planeMesh = new THREE.Mesh(plane, new THREE.ShaderMaterial({
     uniform float cameraNear;
     uniform float cameraFar;
     uniform vec3 lightDir;
+
+    varying vec3 vWorldPosition;
 
     ${noise3dglsl}
     ${fifthsRaytracer}
@@ -388,8 +393,11 @@ const planeMesh = new THREE.Mesh(plane, new THREE.ShaderMaterial({
 
         // 60 FOV
 
+        
+        //vec3 rd = normalize( rotate_vertex_position( vec3(uv, -1.0), cameraQuaternion ) );
+
         vec3 ro = rayOrigin;
-        vec3 rd = normalize( rotate_vertex_position( vec3(uv, -1.0), cameraQuaternion ) );
+        vec3 rd = normalize(vWorldPosition - ro);
 
         float ct;
         float ft;
