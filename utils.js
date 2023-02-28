@@ -246,8 +246,6 @@ export class Float32Array2D {
 
         geometry.computeVertexNormals();
 
-        console.log(geometry);
-
         return geometry;
     }
 

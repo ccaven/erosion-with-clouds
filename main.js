@@ -482,14 +482,70 @@ const heightmap = createNoiseTexture(heightmapSize, heightmapSize, 75, 3.0);
 
 const heightmapGeometry = heightmap.toBufferGeometry(lateraiSize, verticalSize);
 
-const heightmapMaterial = new THREE.MeshPhongMaterial({ color: 'green' });
+const heightmapMaterial = new THREE.ShaderMaterial({
+
+    vertexShader: /* glsl */`
+    varying vec3 vPosition;
+    varying vec3 vNormal;
+    void main() {
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+        vPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+
+        vNormal = normal;
+    }
+
+    `,
+    fragmentShader: /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+
+    vec3 mix(vec3 a, vec3 b, float t) {
+        return a + (b - a) * t;
+    }
+
+    const vec3 lightDir = normalize(vec3(1.0, -1.0, 0.0));
+
+    const vec3 slopeColorLow = vec3(77, 24, 2) / 255.0;
+    const vec3 slopeColorHigh = vec3(77, 65, 61) / 255.0;
+
+    const vec3 grassColorLow = vec3(35, 84, 5) / 255.0;
+    const vec3 grassColorHigh = vec3(9, 148, 23) / 255.0;
+
+    void main() {
+        // 1. Color, based on normal and height
+        float normalAmt = abs(vNormal.y);
+        normalAmt *= normalAmt;
+        normalAmt *= normalAmt;
+        normalAmt *= normalAmt;
+        normalAmt = 1.0 - normalAmt;
+        normalAmt = normalAmt * normalAmt * (3.0 - 2.0 * normalAmt);
+
+        float minY = -0.5;
+        float maxY = 0.5;
+        float altitudeAmt = (vPosition.y - minY) / (maxY - minY);
+        vec3 grassColor = mix(grassColorLow, grassColorHigh, altitudeAmt);
+        vec3 slopeColor = mix(slopeColorLow, slopeColorHigh, altitudeAmt);
+
+        vec3 col = mix(grassColor, slopeColor, normalAmt);
+
+        // 2. Shade
+        float diffuse = max(0.0, -dot(vNormal, lightDir));
+        float ambient = 0.2;
+
+        gl_FragColor.rgb = col * (diffuse * 0.8 + ambient);
+        gl_FragColor.a = 1.0;
+    }
+
+    `,
+
+});
 
 const heightmapMesh = new THREE.Mesh(heightmapGeometry, heightmapMaterial);
 
 const edgeGeometry = heightmap.toEdgesGeometry(lateraiSize, verticalSize);
 
-const edgesMaterial = new THREE.MeshBasicMaterial({color: new THREE.Color(0.3, 0.1, 0.1)});
-const edgesMesh = new THREE.Mesh(edgeGeometry, edgesMaterial);
+const edgesMesh = new THREE.Mesh(edgeGeometry, heightmapMaterial);
 
 scene.add(heightmapMesh);
 scene.add(edgesMesh);
