@@ -17,7 +17,7 @@ import { ShaderPass } from './addons/ShaderPass.js';
 import { CloudShader } from './addons/CloudShader.js';
 */
 
-import { Float32Array2D, createNoiseTexture } from "./utils.js";
+import { createNoiseTexture } from "./utils.js";
 
 const renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById("three-canvas")
@@ -27,23 +27,7 @@ const renderTarget = new THREE.WebGLRenderTarget(600, 600);
 renderTarget.depthTexture = new THREE.DepthTexture(600, 600, THREE.UnsignedShortType);
 renderTarget.depthTexture.format = THREE.DepthFormat;
 
-const cameraNear = 0.05;
-const cameraFar = 10.0;
-const camera = new THREE.PerspectiveCamera(60, 1, cameraNear, cameraFar);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-
-const scene = new THREE.Scene();
-
-camera.position.set(2, 2, 3);
-camera.lookAt(0, 0, 0);
-
-const lightDir = (new THREE.Vector3(-5, -4, -1)).normalize();
-const directionalLight = new THREE.DirectionalLight('white', 1.0);
-directionalLight.lookAt(lightDir.x, lightDir.y, lightDir.z);
-
-scene.add(directionalLight);
-
+// {
 
 const noise3dglsl = /* glsl */`
 vec3 rotate2D(vec3 p, vec2 t){
@@ -148,8 +132,97 @@ float fbm2(vec3 p){
 
 `;
 
+const noiseRenderTarget = new THREE.WebGLRenderTarget(1024, 1024);
+const renderNoise = (() => {
+
+    noiseRenderTarget.texture.magFilter = THREE.NearestFilter;
+
+    const planeGeometry = new THREE.PlaneGeometry(5.0, 5.0);
+    const camera = new THREE.OrthographicCamera(-1, 1, -1, 1, -1, 1);
+
+    const scene = new THREE.Scene();
+
+    const planeMaterial = new THREE.ShaderMaterial({
+
+        uniforms: {
+            iTime: { value: 0, }
+        },
+
+
+        vertexShader: /* glsl */`
+            void main() {
+                gl_Position = vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: /* glsl */`
+            uniform float iTime;
+
+            ${noise3dglsl}
+
+            void main() {
+                int x = int(gl_FragCoord.x) % 128;
+                int y = int(gl_FragCoord.y) % 128;
+
+                int z1 = int(gl_FragCoord.x) / 128;
+                int z2 = int(gl_FragCoord.y) / 128;
+
+                int z = z1 + z2 * 8;
+
+                vec3 p = vec3(x, y, z) / 128.0 - 0.5;
+
+                p *= vec3(8.0, 8.0, 16.0);
+
+                float v = max(fbm((p - vec3(iTime, 0, 0))*vec3(0.5, 1, 0.5))*10.0 - noise3((p - vec3(iTime, 0, 0))*0.3)*20.0, 0.0);
+
+                float boundaryFactor = (3.5-max(abs(p.x), abs(p.y)))/3.5;
+
+                gl_FragColor.r = v * boundaryFactor;
+                gl_FragColor.g = 0.0;
+                gl_FragColor.b = 0.0;
+                gl_FragColor.a = 1.0;
+            }
+        `,
+
+    });
+
+    const planeMesh = new THREE.Mesh(planeGeometry, planeMaterial);
+    scene.add(planeMesh);
+
+    return function () {
+        renderer.setRenderTarget(noiseRenderTarget);
+        renderer.render(scene, camera);
+    };
+
+}) ();
+
+renderNoise();
+
+
+// }
+
+
+const cameraNear = 0.05;
+const cameraFar = 10.0;
+const camera = new THREE.PerspectiveCamera(60, 1, cameraNear, cameraFar);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+
+const scene = new THREE.Scene();
+
+camera.position.set(2, 2, 3);
+camera.lookAt(0, 0, 0);
+
+const lightDir = (new THREE.Vector3(-5, -4, -1)).normalize();
+const directionalLight = new THREE.DirectionalLight('white', 1.0);
+directionalLight.lookAt(lightDir.x, lightDir.y, lightDir.z);
+
+scene.add(directionalLight);
+
+
+
 const fifthsRaytracer = /* glsl */`
 
+uniform sampler2D densityTexture;
 uniform float iTime;
 const float mediaDensity = 4.0;
 
@@ -230,13 +303,64 @@ float densityAtPoint(vec3 p){
         0.0);
 }
 
+float densityAtPoint2(vec3 p) {
+
+    // (0, 1)
+    vec3 _p = (p - b1.pos) / b1.size + 0.5;
+    _p = _p.xzy;
+
+    // from here on, z is up/down
+    _p *= vec3(128.0, 128.0, 64.0);
+
+    //if (true) {
+    //    return _p.z;
+    //}
+
+    int x = clamp(int(_p.x), 0, 128);
+    int y = clamp(int(_p.y), 0, 128);    
+    int z = clamp(int(_p.z), 0, 63);
+    int z2 = z + 1;
+
+    // 0 .. 1
+    float t = _p.z - floor(_p.z);
+
+    if (true) {
+        //return float(y+x+z) / (128.0 + 128.0 + 64.0) * 0.5;
+    }
+
+    vec2 xy = vec2(x, y) / 128.0 / 8.0;
+    vec2 za1 = vec2(
+        z - z / 8 * 8,
+        z / 8
+    ) / 8.0;
+    vec2 za2 = vec2(
+        z2 - z2 / 8 * 8,
+        z2 / 8
+    );
+
+    float d1 = texture2D(densityTexture, xy + za1).r;
+    float d2 = texture2D(densityTexture, xy + za2).r;
+
+    return d1;
+
+    //int z1 = int(floor(_p.y * 64.0));
+    //int z2 = int(ceil(_p.y * 64.0));
+
+    // float t = _p.z - float(z);
+
+    // float d1 = sampleDensityTexture(x, y, z);
+    // float d2 = sampleDensityTexture(x, y, z + 1);
+
+    // return d1;
+}
+
 float getDensityOnRay(vec3 o, vec3 d, float ct, float ft, int res){
     vec3 samplePos = o + d*ct;
     float stepLength = (ft - ct)/float(res);
     vec3 stepDir = d*stepLength;
     float density = 1.0;
     for(int i = 0; i < res; i++){
-        float currDensity = exp(-mediaDensity*stepLength*densityAtPoint(samplePos));
+        float currDensity = exp(-mediaDensity*stepLength*densityAtPoint2(samplePos));
         density *= currDensity;
         samplePos += stepDir;
         if(density >= 0.99) break;
@@ -254,7 +378,7 @@ vec2 renderVolume(vec3 o, vec3 d, float ct, float ft, int res){
     for(int i = 0; i < res; i++){
         //vec3 lightDir = normalize(vec3(0, 10, cos(iTime)*100.0 - 100.0) - samplePos);
         vec3 lightDir = normalize(vec3(-10, -10, 10));
-        float ld = densityAtPoint(samplePos);
+        float ld = densityAtPoint2(samplePos);
         float lct;
         float lft;
         bool lightHit = raytraceBox(samplePos, lightDir, lct, lft, b1);
@@ -315,6 +439,7 @@ const planeMesh = new THREE.Mesh(plane, new THREE.ShaderMaterial({
         cameraQuaternion: { value: camera.quaternion },
         lightDir: { value: lightDir },
         iTime: { value: 0.0 },
+        densityTexture: { value: noiseRenderTarget.texture },
 
         cloudTexture: { value: null },
 
@@ -393,6 +518,11 @@ const planeMesh = new THREE.Mesh(plane, new THREE.ShaderMaterial({
 
         // 60 FOV
 
+        // if (true) {
+        //     gl_FragColor.xyz = texture2D(densityTexture, screenUV).xyz;
+        //     gl_FragColor.a = 1.0;
+        //     return;
+        // }
         
         //vec3 rd = normalize( rotate_vertex_position( vec3(uv, -1.0), cameraQuaternion ) );
 
@@ -422,7 +552,7 @@ const planeMesh = new THREE.Mesh(plane, new THREE.ShaderMaterial({
 
             ft = min(ft, realDepth);
             
-            vec2 renderMedia = renderVolume(ro, rd, ct, ft, 25);
+            vec2 renderMedia = renderVolume(ro, rd, ct, ft, 64);
 
             vec3 col = mix(skyCol, mix(mix(vec3(1, 0.8, 0.7), vec3(0), renderMedia.y), skyCol, 1.0 - exp(-ct*vec3(0.1, 0.1, 0.15))), renderMedia.x);
             gl_FragColor.rgb = col;
