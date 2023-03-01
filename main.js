@@ -170,11 +170,18 @@ const renderNoise = (() => {
 
                 vec3 p = vec3(x, y, z) / 128.0 - 0.5;
 
-                p *= vec3(8.0, 8.0, 16.0);
+                p *= vec3(8.0, 8.0, 8.0);
 
-                float v = max(fbm((p - vec3(iTime, 0, 0))*vec3(0.5, 1, 0.5))*10.0 - noise3((p - vec3(iTime, 0, 0))*0.3)*20.0, 0.0);
+                float v = max(
+                    fbm(
+                        (p - vec3(iTime, 0, 0))*
+                        vec3(0.5, 0.5, 1.0))*10.0 - 
+                        noise3((p - vec3(iTime, 0, 0))*0.3
+                    )*20.0, 
+                    0.0);
+                float boundaryFactor = 1.0 - length(p+vec3(0.0, 0.0, 7.0)) / 8.0;
 
-                float boundaryFactor = (3.5-max(abs(p.x), abs(p.y)))/3.5;
+
 
                 gl_FragColor.r = v * boundaryFactor;
                 gl_FragColor.g = 0.0;
